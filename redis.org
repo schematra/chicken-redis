@@ -244,7 +244,7 @@ chicken
 <<prep-test>>
 <<read-redis-blob-string>>
 (test-group "Blob strings"
-  (test "$10\r\nhelloworld"
+  (test "$10helloworld"
         "helloworld"
         (with-input-from-string "10\r\nhelloworld\r\n" read-redis-blob-string)))
 #+end_src
