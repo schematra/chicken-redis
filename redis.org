@@ -18,8 +18,10 @@
 
 ** Prepare in-line testing
 #+name: prep-test
-#+begin_src scheme :noweb yes :results silent
-(import test
+#+begin_src scheme :noweb yes :tangle tests/run.scm :results silent
+(import r7rs
+        test
+        (chicken base)
         (chicken port)
         (chicken io)
         <<dependencies-for-imports()>>
@@ -77,12 +79,25 @@
 #+end_src
 
 #+begin_src scheme :noweb yes :tangle redis-impl.scm :exports none
-(import (chicken base)
+(import r7rs
+        (chicken base)
         (chicken port)
         (chicken io)
         (chicken tcp)
-        <<dependencies-for-imports()>>
+        (srfi 34)	;; Exception Handling
+        (srfi 35)	;; Exception Types
+        (srfi 69)	;; Hash Tables
+        (srfi 99)	;; Extended Records
+        (srfi 113)	;; Sets and Bags
+        (srfi 128)	;; Comparators
+        (srfi 133)	;; Vectors
+        (srfi 152)	;; Strings
+        (srfi 158)	;; Generators and Accumulators
         )
+#+end_src
+
+#+begin_src scheme :tangle tests/run.scm :exports none
+(include-relative "../redis-impl.scm")
 #+end_src
 
 ** Exceptions
@@ -134,7 +149,7 @@ Calls =proc= with the output port of the =rconn= as current output port, optiona
   (let ((in (redis-connection-input rconn))
         (out (redis-connection-output rconn)))
     (with-output-to-port out
-      (lambda () (apply proc args)))
+      (cut apply proc args))
     (redis-read-reply in)))
 #+end_src
 
@@ -181,7 +196,7 @@ Simple strings start with ~+~ and are single-line.
 #+end_src
 
 #+name: simple-string-test
-#+begin_src scheme :tangle test/run.scm :noweb strip-tangle :exports none :post test-post(input=*this*) :results output
+#+begin_src scheme :tangle tests/run.scm :noweb strip-tangle :exports none :post test-post(input=*this*) :results output
 <<prep-test>>
 <<read-redis-simple-string>>
 (test-group "Simple strings"
@@ -225,7 +240,7 @@ chicken
     str))
 #+end_src
 
-#+begin_src scheme :tangle test/run.scm :noweb strip-tangle :exports none :post test-post(input=*this*) :results output
+#+begin_src scheme :tangle tests/run.scm :noweb strip-tangle :exports none :post test-post(input=*this*) :results output
 <<prep-test>>
 <<read-redis-blob-string>>
 (test-group "Blob strings"
@@ -275,7 +290,7 @@ Integers are sent to the client prefixed with ~:~.
         (string->number elem))))
 #+end_src
 
-#+begin_src scheme :tangle test/run.scm :noweb strip-tangle :exports none :post test-post(input=*this*) :results output
+#+begin_src scheme :tangle tests/run.scm :noweb strip-tangle :exports none :post test-post(input=*this*) :results output
 <<prep-test>>
 <<read-redis-number>>
 (test-group "Integers"
@@ -304,7 +319,7 @@ Bignums are prefixed with ~(~.
 (3492890328409238509324850943850943825024385
 #+end_example
 
-#+begin_src scheme :tangle test/run.scm :noweb strip-tangle :exports none :post test-post(input=*this*) :results output
+#+begin_src scheme :tangle tests/run.scm :noweb strip-tangle :exports none :post test-post(input=*this*) :results output
 <<prep-test>>
 <<read-redis-number>>
 (test-group "Bignums"
@@ -329,7 +344,7 @@ True and false values are represented as ~#t~ and ~#f~, just like in Scheme.
     (string=? (read-line port) "t")))
 #+end_src
 
-#+begin_src scheme :tangle test/run.scm :noweb strip-tangle :exports none :post test-post(input=*this*) :results output
+#+begin_src scheme :tangle tests/run.scm :noweb strip-tangle :exports none :post test-post(input=*this*) :results output
 <<prep-test>>
 <<read-redis-bool>>
 (test-group "Booleans"
@@ -357,7 +372,7 @@ The null type is encoded simply as ~_~, and results in ~'()~.
     (read-line port) '()))
 #+end_src
 
-#+begin_src scheme :tangle test/run.scm :noweb strip-tangle :exports none :post test-post(input=*this*) :results output
+#+begin_src scheme :tangle tests/run.scm :noweb strip-tangle :exports none :post test-post(input=*this*) :results output
 <<prep-test>>
 <<read-redis-null>>
 (test-group "Null"
@@ -395,7 +410,7 @@ Arrays are marked with ~*~ followed by the number of entries, and get returned a
     vec))
 #+end_src
 
-#+begin_src scheme :tangle test/run.scm :noweb strip-tangle :exports none :post test-post(input=*this*) :results output
+#+begin_src scheme :tangle tests/run.scm :noweb strip-tangle :exports none :post test-post(input=*this*) :results output
 <<prep-test>>
 <<redis-read-reply>>
 <<read-redis-array>>
@@ -436,24 +451,24 @@ Maps are represented exactly as arrays, but instead of using the ~*~ byte, the e
     ht))
 #+end_src
 
-#+begin_src scheme :tangle test/run.scm :noweb strip-tangle :exports none :post test-post(input=*this*) :results output
+#+begin_src scheme :tangle tests/run.scm :noweb strip-tangle :exports none :post test-post(input=*this*) :results output
 <<prep-test>>
 <<redis-read-reply>>
 <<read-redis-map>>
 <<read-redis-simple-string>>
 <<read-redis-number>>
 (test-group "Maps"
-  (test "%2+first:1+second:2" '(("first" . 1)
-                                ("second" . 2))
-        (hash-table->alist
-         (with-input-from-string "2\r\n+first\r\n:1\r\n+second\r\n:2\r\n" read-redis-map))))
+  (let ((ht (with-input-from-string "2\r\n+first\r\n:1\r\n+second\r\n:2\r\n" read-redis-map)))
+    (test 1 (hash-table-ref ht "first"))
+    (test 2 (hash-table-ref ht "second"))))
 #+end_src
 
 #+RESULTS:
 : -- testing Maps --------------------------------------------------------------
-: %2+first:1+second:2 .................................................. [ PASS]
-: 1 test completed in 0.0 seconds.
-: 1 out of 1 (100%) test passed.
+: (hash-table-ref ht "first") .......................................... [ PASS]
+: (hash-table-ref ht "second") ......................................... [ PASS]
+: 2 tests completed in 0.001 seconds.
+: 2 out of 2 (100%) tests passed.
 : -- done testing Maps ---------------------------------------------------------
 
 *** Sets
@@ -488,7 +503,7 @@ Additionally, there is a parameter defined, =redis-set-comparator=, that specifi
     s))
 #+end_src
 
-#+begin_src scheme :tangle test/run.scm :noweb strip-tangle :exports none :post test-post(input=*this*) :results output
+#+begin_src scheme :tangle tests/run.scm :noweb strip-tangle :exports none :post test-post(input=*this*) :results output
 <<prep-test>>
 <<redis-read-reply>>
 <<read-redis-simple-string>>
@@ -529,12 +544,16 @@ This library returns two values in this case, the first value being the actual d
  (category db)
  (license "BSD")
  (version <<latest-release()>>)
- (dependencies <<dependencies-for-egg()>>)
+ (dependencies r7rs <<dependencies-for-egg()>>)
  (test-dependencies test)
 
  (components
    (extension redis
               (csc-options "-X" "r7rs" "-R" "r7rs" "-sJ"))))
+#+end_src
+
+#+begin_src scheme :tangle tests/run.scm :exports none
+(test-exit)
 #+end_src
 
 ** Source

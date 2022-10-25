@@ -1,3 +1,24 @@
+(import (chicken string))
+(import r7rs
+        test
+        (chicken base)
+        (chicken port)
+        (chicken io)
+        (srfi 34)	;; Exception Handling
+        (srfi 35)	;; Exception Types
+        (srfi 69)	;; Hash Tables
+        (srfi 99)	;; Extended Records
+        (srfi 113)	;; Sets and Bags
+        (srfi 128)	;; Comparators
+        (srfi 133)	;; Vectors
+        (srfi 152)	;; Strings
+        (srfi 158)	;; Generators and Accumulators
+)
+
+;; [[file:../redis.org::*API][API:3]]
+(include-relative "../redis-impl.scm")
+;; API:3 ends here
+
 
 
 ;; #+name: simple-string-test
@@ -58,10 +79,9 @@
 
 ;; [[file:../redis.org::*Maps][Maps:2]]
 (test-group "Maps"
-  (test "%2+first:1+second:2" '(("first" . 1)
-                                ("second" . 2))
-        (hash-table->alist
-         (with-input-from-string "2\r\n+first\r\n:1\r\n+second\r\n:2\r\n" read-redis-map))))
+  (let ((ht (with-input-from-string "2\r\n+first\r\n:1\r\n+second\r\n:2\r\n" read-redis-map)))
+    (test 1 (hash-table-ref ht "first"))
+    (test 2 (hash-table-ref ht "second"))))
 ;; Maps:2 ends here
 
 ;; [[file:../redis.org::*Sets][Sets:2]]
@@ -70,3 +90,7 @@
     (set=? (set (redis-set-comparator) "orange" "apple" #t #f)
            (with-input-from-string "4\r\n+orange\r\n+apple\r\n#t\r\n#f\r\n" read-redis-set))))
 ;; Sets:2 ends here
+
+;; [[file:../redis.org::*About this egg][About this egg:2]]
+(test-exit)
+;; About this egg:2 ends here

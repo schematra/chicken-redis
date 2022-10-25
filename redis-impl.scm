@@ -1,5 +1,6 @@
 ;; [[file:redis.org::*API][API:2]]
-(import (chicken base)
+(import r7rs
+        (chicken base)
         (chicken port)
         (chicken io)
         (chicken tcp)
@@ -73,7 +74,7 @@
   (let ((in (redis-connection-input rconn))
         (out (redis-connection-output rconn)))
     (with-output-to-port out
-      (lambda () (apply proc args)))
+      (cut apply proc args))
     (redis-read-reply in)))
 ;; Running Commands:2 ends here
 
@@ -319,9 +320,10 @@
 
 ;; #+RESULTS:
 ;; : -- testing Maps --------------------------------------------------------------
-;; : %2+first:1+second:2 .................................................. [ PASS]
-;; : 1 test completed in 0.0 seconds.
-;; : 1 out of 1 (100%) test passed.
+;; : (hash-table-ref ht "first") .......................................... [ PASS]
+;; : (hash-table-ref ht "second") ......................................... [ PASS]
+;; : 2 tests completed in 0.001 seconds.
+;; : 2 out of 2 (100%) tests passed.
 ;; : -- done testing Maps ---------------------------------------------------------
 
 ;; *** Sets
