@@ -1,0 +1,14 @@
+;; [[file:redis.org::*About this egg][About this egg:1]]
+;; -*- Scheme -*-
+((author "Daniel Ziltener")
+ (synopsis "A Redis client library for Chicken Scheme")
+ (category db)
+ (license "BSD")
+ (version "0.5")
+ (dependencies srfi-34 srfi-35 srfi-69 srfi-99 srfi-113 srfi-128 srfi-133 srfi-152 srfi-158)
+ (test-dependencies test)
+
+ (components
+   (extension redis
+              (csc-options "-X" "r7rs" "-R" "r7rs" "-sJ"))))
+;; About this egg:1 ends here

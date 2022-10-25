@@ -1,0 +1,195 @@
+# Created 2022-10-25 Di 16:58
+#+title: Redis
+#+author: Daniel Ziltener
+#+property: header-args:scheme :session *chicken* :comments both
+
+* Dependencies
+#+name: dependencies
+| SRFI | Description                 |
+|------+-----------------------------|
+|   34 | Exception Handling          |
+|   35 | Exception Types             |
+|   69 | Hash Tables                 |
+|   99 | Extended Records            |
+|  113 | Sets and Bags               |
+|  128 | Comparators                 |
+|  133 | Vectors                     |
+|  152 | Strings                     |
+|  158 | Generators and Accumulators |
+
+* API
+
+** Exceptions
+This library defines an SRFI-35 exception type ~&redis-error~ that gets raised when Redis returns an error. The exception type has a single field called ~redis-error-message~ containing the error message returned by Redis.
+#+begin_src scheme
+(define-condition-type &redis-error &error
+  redis-error?
+  (redis-error-message redis-error-message))
+#+end_src
+
+** Connection Management
+This egg currently uses a simple TCP connection without any "bells and whistles". The two ports are kept in a record of type =redis-connection= in the fields ~input~ and ~output~.
+
+~(redis-connect host port)~
+Connects to a (hopefully) Redis server at =host:port=.
+
+~(redis-disconnect rconn)~
+Disconnects from =rconn= which must be a =redis-connection=.
+** Running Commands
+
+~(redis-run rconn command . args)~
+Uses connection =rconn= to run =command= with =args=. The args will be appended to the command, space-separated. Returns the parsed reply.
+~(redis-run-proc rconn proc . args)~
+Calls =proc= with the output port of the =rconn= as current output port, optionally with =args=. Returns the parsed reply.
+** Supported Data Types
+
+This Redis client supports all data types up to and including as specified in [[https://github.com/antirez/RESP3/blob/master/spec.md][RESP3]]. Setting the protocol version with the =HELLO= command, however, is the user's responsibility.
+
+*** Simple Strings
+Simple strings start with ~+~ and are single-line.
+
+#+name: read-redis-simple-string-example
+#+begin_example
++this is a simple string.
+#+end_example
+
+*** Simple Errors
+Simple errors are like simple strings, but they start with a ~-~ instead.
+
+#+begin_example
+-ERR unknown command 'helloworld'
+#+end_example
+
+*** Blob Strings
+Blob strings are longer, potentially multi-line strings. Their sigil is ~$~, followed by an integer designating the string length.
+
+#+begin_example
+$7
+chicken
+#+end_example
+
+*** Blob Errors
+Analogous to simple errors, blob errors are just blob strings. Receiving one with this Redis library will raise an error.
+
+#+begin_example
+!7
+chicken
+#+end_example
+
+*** Verbatim Strings
+This is exactly like the Blob string type, but the initial byte is = instead of $. Moreover the first three bytes provide information about the format of the following string, which can be txt for plain text, or mkd for markdown. This library treats verbatim strings exactly like blob strings and won't split off the format info.
+
+#+begin_example
+=15
+txt:Some string
+#+end_example
+
+*** Integers
+Integers are sent to the client prefixed with ~:~.
+
+#+begin_example
+:180
+#+end_example
+
+*** Doubles
+Doubles are prefixed with ~,~. The data type also allows =inf= for positive and =-inf= for negative infinity.
+
+#+begin_example
+,1.23
+#+end_example
+
+*** Bignums
+Bignums are prefixed with ~(~.
+
+#+begin_example
+(3492890328409238509324850943850943825024385
+#+end_example
+
+*** Booleans
+True and false values are represented as ~#t~ and ~#f~, just like in Scheme.
+
+*** Null
+The null type is encoded simply as ~_~, and results in ~'()~.
+
+*** Arrays
+Arrays are marked with ~*~ followed by the number of entries, and get returned as srfi-133 vectors.
+
+#+begin_example
+,*3
+:1
+:2
+:3
+#+end_example
+
+*** Maps
+Maps are represented exactly as arrays, but instead of using the ~*~ byte, the encoded value starts with a ~%~ byte. Moreover the number of following elements must be even. Maps represent a sequence of field-value items, basically what we could call a dictionary data structure, or in other terms, an hash. They get returned as srfi-69 hash tables.
+
+#+begin_example
+%2
++first
+:1
++second
+:2
+#+end_example
+
+*** Sets
+Sets are exactly like the Array type, but the first byte is ~~~ instead of ~*~. They get returned as srfi-113 sets.
+Additionally, there is a parameter defined, =redis-set-comparator=, that specifies the default comparator to be used for sets. It defaults to `(make-default-comparator)`.
+
+#+begin_example
+~4
++orange
++apple
+#t
+#f
+#+end_example
+
+*** Attributes
+The attribute type is exactly like the Map type, but instead of the ~%~ first byte, the ~|~ byte is used. Attributes describe a dictionary exactly like the Map type, however the client should not consider such a dictionary part of the reply, but just auxiliary data that is used in order to augment the reply.
+
+This library returns two values in this case, the first value being the actual data reply from redis, the second one being the attributes.
+
+* About this egg
+
+** Source
+
+The source is available at [[https://gitea.lyrion.ch/zilti/redis.git]].
+
+** Author
+
+Daniel Ziltener
+
+** Version History
+
+#+name: version-history
+| 0.5 | Initial Release |
+
+** License
+
+#+begin_src fundamental
+Copyright (C) 2022 Daniel Ziltener
+
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+    ,* Redistributions of source code must retain the above copyright
+      notice, this list of conditions and the following disclaimer.
+    ,* Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in the
+      documentation and/or other materials provided with the distribution.
+    ,* Neither the name of the <organization> nor the
+      names of its contributors may be used to endorse or promote products
+      derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT HOLDER> BE LIABLE FOR ANY
+DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#+end_src

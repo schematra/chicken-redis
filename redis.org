@@ -1,0 +1,599 @@
+#+title: Redis
+#+author: Daniel Ziltener
+#+property: header-args:scheme :session *chicken* :comments both
+
+* Helpers :noexport:
+:PROPERTIES:
+:header-args:scheme: :prologue "(import (chicken string))"
+:END:
+** Strip garbage from test results
+#+name: test-post
+#+begin_src scheme :var input='() :results output
+(for-each (lambda (str)
+            (or (substring=? str ";")
+                (substring=? str "Note")
+                (print str)))
+          (string-split input "\n"))
+#+end_src
+
+** Prepare in-line testing
+#+name: prep-test
+#+begin_src scheme :noweb yes :results silent
+(import test
+        (chicken port)
+        (chicken io)
+        <<dependencies-for-imports()>>
+)
+#+end_src
+
+* Dependencies
+#+name: dependencies
+| SRFI | Description                 |
+|------+-----------------------------|
+|   34 | Exception Handling          |
+|   35 | Exception Types             |
+|   69 | Hash Tables                 |
+|   99 | Extended Records            |
+|  113 | Sets and Bags               |
+|  128 | Comparators                 |
+|  133 | Vectors                     |
+|  152 | Strings                     |
+|  158 | Generators and Accumulators |
+
+#+name: dependencies-for-egg
+#+begin_src emacs-lisp :var tbl=dependencies :colnames yes :results raw :exports none
+(mapconcat (lambda (row) (concat "srfi-" (number-to-string (car row))))
+           tbl " ")
+#+end_src
+
+#+name: dependencies-for-imports
+#+begin_src emacs-lisp :var tbl=dependencies :colnames yes :results raw :exports none
+(mapconcat (lambda (row) (concat "(srfi " (number-to-string (car row)) ")\t;; " (cadr row)))
+           tbl "\n")
+#+end_src
+
+* API
+
+#+begin_src scheme :noweb yes :tangle redis.scm :exports none
+(define-library (redis)
+  (import (chicken base))
+  (export redis-connect
+          redis-disconnect
+          redis-run
+          redis-run-proc
+
+          make-redis-connection
+          redis-connection?
+          redis-connection-input
+          redis-connection-output
+
+          &redis-error
+          redis-error?
+          redis-error-message
+
+          redis-set-comparator)
+  (begin
+    (include-relative "redis-impl.scm")))
+#+end_src
+
+#+begin_src scheme :noweb yes :tangle redis-impl.scm :exports none
+(import (chicken base)
+        (chicken port)
+        (chicken io)
+        (chicken tcp)
+        <<dependencies-for-imports()>>
+        )
+#+end_src
+
+** Exceptions
+This library defines an SRFI-35 exception type ~&redis-error~ that gets raised when Redis returns an error. The exception type has a single field called ~redis-error-message~ containing the error message returned by Redis.
+#+begin_src scheme :tangle redis-impl.scm
+(define-condition-type &redis-error &error
+  redis-error?
+  (redis-error-message redis-error-message))
+#+end_src
+
+** Connection Management
+This egg currently uses a simple TCP connection without any "bells and whistles". The two ports are kept in a record of type =redis-connection= in the fields ~input~ and ~output~.
+
+~(redis-connect host port)~
+Connects to a (hopefully) Redis server at =host:port=.
+
+#+begin_src scheme :tangle redis-impl.scm :exports none
+(define-record-type redis-connection #t #t input output)
+(define (redis-connect host port)
+  (let-values (((i o) (tcp-connect host port)))
+    (make-redis-connection i o)))
+#+end_src
+
+~(redis-disconnect rconn)~
+Disconnects from =rconn= which must be a =redis-connection=.
+#+begin_src scheme :tangle redis-impl.scm :exports none
+(define (redis-disconnect rconn)
+  (tcp-abandon-port (redis-connection-input rconn))
+  (tcp-abandon-port (redis-connection-output rconn)))
+#+end_src
+
+** Running Commands
+
+~(redis-run rconn command . args)~
+Uses connection =rconn= to run =command= with =args=. The args will be appended to the command, space-separated. Returns the parsed reply.
+#+begin_src scheme :tangle redis-impl.scm :exports none
+(define (redis-run rconn command . args)
+  (let ((in (redis-connection-input rconn))
+        (out (redis-connection-output rconn))
+        (comm (string-join (cons command args))))
+    (write-line comm out)
+    (redis-read-reply in)))
+#+end_src
+
+~(redis-run-proc rconn proc . args)~
+Calls =proc= with the output port of the =rconn= as current output port, optionally with =args=. Returns the parsed reply.
+#+begin_src scheme :tangle redis-impl.scm :exports none
+(define (redis-run-proc rconn proc . args)
+  (let ((in (redis-connection-input rconn))
+        (out (redis-connection-output rconn)))
+    (with-output-to-port out
+      (lambda () (apply proc args)))
+    (redis-read-reply in)))
+#+end_src
+
+
+** Supported Data Types
+
+This Redis client supports all data types up to and including as specified in [[https://github.com/antirez/RESP3/blob/master/spec.md][RESP3]]. Setting the protocol version with the =HELLO= command, however, is the user's responsibility.
+
+#+name: redis-read-reply
+#+begin_src scheme :tangle redis-impl.scm :exports none
+(define (redis-read-reply #!optional port)
+  (let* ((port (or port (current-input-port)))
+         (sigil (read-char port)))
+    (case sigil
+      ((#\+) (read-redis-simple-string port))
+      ((#\-) (raise (make-condition &redis-error 'redis-error-message (read-redis-simple-string port))))
+      ((#\$) (read-redis-blob-string port))
+      ((#\!) (raise (make-condition &redis-error 'redis-error-message (read-redis-blob-string port))))
+      ((#\=) (read-redis-blob-string port))
+      ((#\:) (read-redis-number port))
+      ((#\,) (read-redis-number port))
+      ((#\() (read-redis-number port))
+      ((#\#) (read-redis-bool port))
+      ((#\_) (read-redis-null port))
+      ((#\*) (read-redis-array port))
+      ((#\%) (read-redis-map port))
+      ((#\~) (read-redis-set port))
+      ((#\|) (read-redis-with-attributes port)))))
+#+end_src
+
+*** Simple Strings
+Simple strings start with ~+~ and are single-line.
+
+#+name: read-redis-simple-string-example
+#+begin_example
++this is a simple string.
+#+end_example
+
+#+name: read-redis-simple-string
+#+begin_src scheme :tangle redis-impl.scm :exports none :results silent
+(define (read-redis-simple-string #!optional port)
+  (let ((port (or port (current-input-port))))
+    (read-line port)))
+#+end_src
+
+#+name: simple-string-test
+#+begin_src scheme :tangle test/run.scm :noweb strip-tangle :exports none :post test-post(input=*this*) :results output
+<<prep-test>>
+<<read-redis-simple-string>>
+(test-group "Simple strings"
+    (test "+this is a simple string."
+          "this is a simple string."
+          (with-input-from-string "this is a simple string.\r\n" read-redis-simple-string)))
+#+end_src
+
+#+RESULTS: simple-string-test
+: -- testing Simple strings ----------------------------------------------------
+: +this is a simple string. ............................................ [ PASS]
+: 1 test completed in 0.0 seconds.
+: 1 out of 1 (100%) test passed.
+: -- done testing Simple strings -----------------------------------------------
+
+*** Simple Errors
+Simple errors are like simple strings, but they start with a ~-~ instead.
+
+#+begin_example
+-ERR unknown command 'helloworld'
+#+end_example
+
+*** Blob Strings
+Blob strings are longer, potentially multi-line strings. Their sigil is ~$~, followed by an integer designating the string length.
+
+#+begin_example
+$7
+chicken
+#+end_example
+
+#+name: read-redis-blob-string
+#+begin_src scheme :tangle redis-impl.scm :exports none
+(define (read-redis-blob-string #!optional port)
+  (let* ((port (or port (current-input-port)))
+         (charcount (string->number (read-line port)))
+         (str (list->string
+               (generator-map->list
+                (lambda (i) (read-char port))
+                (make-range-generator 0 charcount)))))
+    (read-line port)
+    str))
+#+end_src
+
+#+begin_src scheme :tangle test/run.scm :noweb strip-tangle :exports none :post test-post(input=*this*) :results output
+<<prep-test>>
+<<read-redis-blob-string>>
+(test-group "Blob strings"
+  (test "$10\r\nhelloworld"
+        "helloworld"
+        (with-input-from-string "10\r\nhelloworld\r\n" read-redis-blob-string)))
+#+end_src
+
+#+RESULTS:
+: -- testing Blob strings ------------------------------------------------------
+: $10
+: helloworld ...................................................... [ PASS]
+: 1 test completed in 0.0 seconds.
+: 1 out of 1 (100%) test passed.
+: -- done testing Blob strings -------------------------------------------------
+
+*** Blob Errors
+Analogous to simple errors, blob errors are just blob strings. Receiving one with this Redis library will raise an error.
+
+#+begin_example
+!7
+chicken
+#+end_example
+
+*** Verbatim Strings
+This is exactly like the Blob string type, but the initial byte is = instead of $. Moreover the first three bytes provide information about the format of the following string, which can be txt for plain text, or mkd for markdown. This library treats verbatim strings exactly like blob strings and won't split off the format info.
+
+#+begin_example
+=15
+txt:Some string
+#+end_example
+
+*** Integers
+Integers are sent to the client prefixed with ~:~.
+
+#+begin_example
+:180
+#+end_example
+
+#+name: read-redis-number
+#+begin_src scheme :tangle redis-impl.scm :exports none
+(define (read-redis-number #!optional port)
+  (let* ((port (or port (current-input-port)))
+         (elem (read-line port)))
+    (if (string=? elem "inf")
+        (string->number "+inf")
+        (string->number elem))))
+#+end_src
+
+#+begin_src scheme :tangle test/run.scm :noweb strip-tangle :exports none :post test-post(input=*this*) :results output
+<<prep-test>>
+<<read-redis-number>>
+(test-group "Integers"
+  (test ":180" 180
+        (with-input-from-string "180\r\n" read-redis-number)))
+#+end_src
+
+#+RESULTS:
+: -- testing Integers ----------------------------------------------------------
+: :180 ................................................................. [ PASS]
+: 1 test completed in 0.0 seconds.
+: 1 out of 1 (100%) test passed.
+: -- done testing Integers -----------------------------------------------------
+
+*** Doubles
+Doubles are prefixed with ~,~. The data type also allows =inf= for positive and =-inf= for negative infinity.
+
+#+begin_example
+,1.23
+#+end_example
+
+*** Bignums
+Bignums are prefixed with ~(~.
+
+#+begin_example
+(3492890328409238509324850943850943825024385
+#+end_example
+
+#+begin_src scheme :tangle test/run.scm :noweb strip-tangle :exports none :post test-post(input=*this*) :results output
+<<prep-test>>
+<<read-redis-number>>
+(test-group "Bignums"
+  (test "(3492890328409238509324850943850943825024385" 3492890328409238509324850943850943825024385
+        (with-input-from-string "3492890328409238509324850943850943825024385\r\n" read-redis-number)))
+#+end_src
+
+#+RESULTS:
+: -- testing Bignums -----------------------------------------------------------
+: (3492890328409238509324850943850943825024385 ......................... [ PASS]
+: 1 test completed in 0.0 seconds.
+: 1 out of 1 (100%) test passed.
+: -- done testing Bignums ------------------------------------------------------
+
+*** Booleans
+True and false values are represented as ~#t~ and ~#f~, just like in Scheme.
+
+#+name: read-redis-bool
+#+begin_src scheme :tangle redis-impl.scm :exports none
+(define (read-redis-bool #!optional port)
+  (let ((port (or port (current-input-port))))
+    (string=? (read-line port) "t")))
+#+end_src
+
+#+begin_src scheme :tangle test/run.scm :noweb strip-tangle :exports none :post test-post(input=*this*) :results output
+<<prep-test>>
+<<read-redis-bool>>
+(test-group "Booleans"
+  (test "#t" #t
+        (with-input-from-string "t" read-redis-bool))
+  (test "#f" #f
+        (with-input-from-string "f" read-redis-bool)))
+#+end_src
+
+#+RESULTS:
+: -- testing Booleans ----------------------------------------------------------
+: #t ................................................................... [ PASS]
+: #f ................................................................... [ PASS]
+: 2 tests completed in 0.0 seconds.
+: 2 out of 2 (100%) tests passed.
+: -- done testing Booleans -----------------------------------------------------
+
+*** Null
+The null type is encoded simply as ~_~, and results in ~'()~.
+
+#+name: read-redis-null
+#+begin_src scheme :tangle redis-impl.scm :exports none
+(define (read-redis-null #!optional port)
+  (let ((port (or port (current-input-port))))
+    (read-line port) '()))
+#+end_src
+
+#+begin_src scheme :tangle test/run.scm :noweb strip-tangle :exports none :post test-post(input=*this*) :results output
+<<prep-test>>
+<<read-redis-null>>
+(test-group "Null"
+  (test "_" '()
+        (with-input-from-string "" read-redis-null)))
+#+end_src
+
+#+RESULTS:
+: -- testing Null --------------------------------------------------------------
+: _ .................................................................... [ PASS]
+: 1 test completed in 0.0 seconds.
+: 1 out of 1 (100%) test passed.
+: -- done testing Null ---------------------------------------------------------
+
+*** Arrays
+Arrays are marked with ~*~ followed by the number of entries, and get returned as srfi-133 vectors.
+
+#+begin_example
+*3
+:1
+:2
+:3
+#+end_example
+
+#+name: read-redis-array
+#+begin_src scheme :tangle redis-impl.scm :exports none
+(define (read-redis-array #!optional port)
+  (let* ((port (or port (current-input-port)))
+         (elems (string->number (read-line port)))
+         (vec (make-vector elems '())))
+    (generator-for-each
+     (lambda (i)
+       (vector-set! vec i (redis-read-reply port)))
+     (make-range-generator 0 elems))
+    vec))
+#+end_src
+
+#+begin_src scheme :tangle test/run.scm :noweb strip-tangle :exports none :post test-post(input=*this*) :results output
+<<prep-test>>
+<<redis-read-reply>>
+<<read-redis-array>>
+<<read-redis-number>>
+(test-group "Arrays"
+  (test "*3:1:2:3" #(1 2 3)
+        (with-input-from-string "3\r\n:1\r\n:2\r\n:3\r\n" read-redis-array)))
+#+end_src
+
+#+RESULTS:
+: -- testing Arrays ------------------------------------------------------------
+: *3:1:2:3 ............................................................. [ PASS]
+: 1 test completed in 0.0 seconds.
+: 1 out of 1 (100%) test passed.
+: -- done testing Arrays -------------------------------------------------------
+
+*** Maps
+Maps are represented exactly as arrays, but instead of using the ~*~ byte, the encoded value starts with a ~%~ byte. Moreover the number of following elements must be even. Maps represent a sequence of field-value items, basically what we could call a dictionary data structure, or in other terms, an hash. They get returned as srfi-69 hash tables.
+
+#+begin_example
+%2
++first
+:1
++second
+:2
+#+end_example
+
+#+name: read-redis-map
+#+begin_src scheme :tangle redis-impl.scm :exports none
+(define (read-redis-map #!optional port)
+  (let* ((port (or port (current-input-port)))
+         (elems (string->number (read-line port)))
+         (ht (make-hash-table)))
+    (generator-for-each
+     (lambda (i)
+       (hash-table-set! ht (redis-read-reply port) (redis-read-reply port)))
+     (make-range-generator 0 elems))
+    ht))
+#+end_src
+
+#+begin_src scheme :tangle test/run.scm :noweb strip-tangle :exports none :post test-post(input=*this*) :results output
+<<prep-test>>
+<<redis-read-reply>>
+<<read-redis-map>>
+<<read-redis-simple-string>>
+<<read-redis-number>>
+(test-group "Maps"
+  (test "%2+first:1+second:2" '(("first" . 1)
+                                ("second" . 2))
+        (hash-table->alist
+         (with-input-from-string "2\r\n+first\r\n:1\r\n+second\r\n:2\r\n" read-redis-map))))
+#+end_src
+
+#+RESULTS:
+: -- testing Maps --------------------------------------------------------------
+: %2+first:1+second:2 .................................................. [ PASS]
+: 1 test completed in 0.0 seconds.
+: 1 out of 1 (100%) test passed.
+: -- done testing Maps ---------------------------------------------------------
+
+*** Sets
+Sets are exactly like the Array type, but the first byte is ~~~ instead of ~*~. They get returned as srfi-113 sets.
+Additionally, there is a parameter defined, =redis-set-comparator=, that specifies the default comparator to be used for sets. It defaults to `(make-default-comparator)`.
+
+#+begin_example
+~4
++orange
++apple
+#t
+#f
+#+end_example
+
+#+name: read-redis-set
+#+begin_src scheme :tangle redis-impl.scm :exports none
+(define redis-set-comparator
+  (make-parameter (make-default-comparator)
+                  (lambda (newcomp)
+                    (or (and (comparator? newcomp)
+                             newcomp)
+                        '()))))
+
+(define (read-redis-set #!optional port)
+  (let* ((port (or port (current-input-port)))
+         (elems (string->number (read-line port)))
+         (s (set (redis-set-comparator))))
+    (generator-for-each
+     (lambda (i)
+       (set-adjoin! s (redis-read-reply port)))
+     (make-range-generator 0 elems))
+    s))
+#+end_src
+
+#+begin_src scheme :tangle test/run.scm :noweb strip-tangle :exports none :post test-post(input=*this*) :results output
+<<prep-test>>
+<<redis-read-reply>>
+<<read-redis-simple-string>>
+<<read-redis-bool>>
+<<read-redis-set>>
+(test-group "Sets"
+  (test-assert "~4+orange+apple#t#f"
+    (set=? (set (redis-set-comparator) "orange" "apple" #t #f)
+           (with-input-from-string "4\r\n+orange\r\n+apple\r\n#t\r\n#f\r\n" read-redis-set))))
+#+end_src
+
+#+RESULTS:
+: -- testing Sets --------------------------------------------------------------
+: ~4+orange+apple#t#f .................................................. [ PASS]
+: 1 test completed in 0.001 seconds.
+: 1 out of 1 (100%) test passed.
+: -- done testing Sets ---------------------------------------------------------
+
+*** Attributes
+The attribute type is exactly like the Map type, but instead of the ~%~ first byte, the ~|~ byte is used. Attributes describe a dictionary exactly like the Map type, however the client should not consider such a dictionary part of the reply, but just auxiliary data that is used in order to augment the reply.
+
+This library returns two values in this case, the first value being the actual data reply from redis, the second one being the attributes.
+
+#+name: read-redis-with-attributes
+#+begin_src scheme :tangle redis-impl.scm :exports none
+(define (read-redis-with-attributes #!optional port)
+  (let* ((port (or port (current-input-port)))
+         (attributes (read-redis-map port)))
+    (values (redis-read-reply port) attributes)))
+#+end_src
+
+* About this egg
+
+#+begin_src scheme :noweb yes :tangle redis.egg :exports none
+;; -*- Scheme -*-
+((author "Daniel Ziltener")
+ (synopsis "A Redis client library for Chicken Scheme")
+ (category db)
+ (license "BSD")
+ (version <<latest-release()>>)
+ (dependencies <<dependencies-for-egg()>>)
+ (test-dependencies test)
+
+ (components
+   (extension redis
+              (csc-options "-X" "r7rs" "-R" "r7rs" "-sJ"))))
+#+end_src
+
+** Source
+
+The source is available at [[https://gitea.lyrion.ch/zilti/redis.git]].
+
+** Author
+
+Daniel Ziltener
+
+** Version History
+
+#+name: version-history
+| 0.5 | Initial Release |
+
+#+name: gen-releases
+#+begin_src emacs-lisp :var vers=version-history :results raw :exports none
+(mapconcat (lambda (row) (concat "(release \"" (number-to-string (car row)) "\") ;; " (cadr row)))
+           vers "\n")
+#+end_src
+
+#+name: latest-release
+#+begin_src emacs-lisp :var vers=version-history :exports none :results code
+(number-to-string (caar vers))
+#+end_src
+
+#+begin_src scheme :noweb yes :tangle redis.release-info :exports none
+;; -*- Scheme -*-
+(repo git "https://gitea.lyrion.ch/zilti/redis.git")
+(uri targz "https://gitea.lyrion.ch/zilti/redis/archive/{egg-release}.tar.gz")
+<<gen-releases()>>
+#+end_src
+
+** License
+
+#+begin_src fundamental :tangle LICENSE
+Copyright (C) 2022 Daniel Ziltener
+
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+    * Redistributions of source code must retain the above copyright
+      notice, this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in the
+      documentation and/or other materials provided with the distribution.
+    * Neither the name of the <organization> nor the
+      names of its contributors may be used to endorse or promote products
+      derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT HOLDER> BE LIABLE FOR ANY
+DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#+end_src
