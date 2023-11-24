@@ -1,3 +1,6 @@
+;; About this egg
+
+
 ;; [[file:redis.org::*About this egg][About this egg:1]]
 ;; -*- Scheme -*-
 ((author "Daniel Ziltener")

@@ -16,7 +16,7 @@
         )
 ;; API:2 ends here
 
-
+;; Exceptions
 ;; This library defines an SRFI-35 exception type ~&redis-error~ that gets raised when Redis returns an error. The exception type has a single field called ~redis-error-message~ containing the error message returned by Redis.
 
 ;; [[file:redis.org::*Exceptions][Exceptions:1]]
@@ -25,7 +25,7 @@
   (redis-error-message redis-error-message))
 ;; Exceptions:1 ends here
 
-
+;; Connection Management
 ;; This egg currently uses a simple TCP connection without any "bells and whistles". The two ports are kept in a record of type =redis-connection= in the fields ~input~ and ~output~.
 
 ;; ~(redis-connect host port)~
@@ -50,7 +50,7 @@
   (tcp-abandon-port (redis-connection-output rconn)))
 ;; Connection Management:2 ends here
 
-
+;; Running Commands
 
 ;; ~(redis-run rconn command . args)~
 ;; Uses connection =rconn= to run =command= with =args=. The args will be appended to the command, space-separated. Returns the parsed reply.
@@ -78,10 +78,7 @@
     (redis-read-reply in)))
 ;; Running Commands:2 ends here
 
-
-
-
-;; ** Supported Data Types
+;; Supported Data Types
 
 ;; This Redis client supports all data types up to and including as specified in [[https://github.com/antirez/RESP3/blob/master/spec.md][RESP3]]. Setting the protocol version with the =HELLO= command, however, is the user's responsibility.
 
@@ -108,9 +105,7 @@
       ((#\|) (read-redis-with-attributes port)))))
 ;; redis-read-reply ends here
 
-
-
-;; *** Simple Strings
+;; Simple Strings
 ;; Simple strings start with ~+~ and are single-line.
 
 ;; #+name: read-redis-simple-string-example
@@ -126,23 +121,7 @@
     (read-line port)))
 ;; read-redis-simple-string ends here
 
-
-
-;; #+RESULTS: simple-string-test
-;; : -- testing Simple strings ----------------------------------------------------
-;; : +this is a simple string. ............................................ [ PASS]
-;; : 1 test completed in 0.0 seconds.
-;; : 1 out of 1 (100%) test passed.
-;; : -- done testing Simple strings -----------------------------------------------
-
-;; *** Simple Errors
-;; Simple errors are like simple strings, but they start with a ~-~ instead.
-
-;; #+begin_example
-;; -ERR unknown command 'helloworld'
-;; #+end_example
-
-;; *** Blob Strings
+;; Blob Strings
 ;; Blob strings are longer, potentially multi-line strings. Their sigil is ~$~, followed by an integer designating the string length.
 
 ;; #+begin_example
@@ -164,33 +143,7 @@
     str))
 ;; read-redis-blob-string ends here
 
-
-
-;; #+RESULTS:
-;; : -- testing Blob strings ------------------------------------------------------
-;; : $10
-;; : helloworld ...................................................... [ PASS]
-;; : 1 test completed in 0.0 seconds.
-;; : 1 out of 1 (100%) test passed.
-;; : -- done testing Blob strings -------------------------------------------------
-
-;; *** Blob Errors
-;; Analogous to simple errors, blob errors are just blob strings. Receiving one with this Redis library will raise an error.
-
-;; #+begin_example
-;; !7
-;; chicken
-;; #+end_example
-
-;; *** Verbatim Strings
-;; This is exactly like the Blob string type, but the initial byte is = instead of $. Moreover the first three bytes provide information about the format of the following string, which can be txt for plain text, or mkd for markdown. This library treats verbatim strings exactly like blob strings and won't split off the format info.
-
-;; #+begin_example
-;; =15
-;; txt:Some string
-;; #+end_example
-
-;; *** Integers
+;; Integers
 ;; Integers are sent to the client prefixed with ~:~.
 
 ;; #+begin_example
@@ -208,16 +161,7 @@
         (string->number elem))))
 ;; read-redis-number ends here
 
-
-
-;; #+RESULTS:
-;; : -- testing Bignums -----------------------------------------------------------
-;; : (3492890328409238509324850943850943825024385 ......................... [ PASS]
-;; : 1 test completed in 0.0 seconds.
-;; : 1 out of 1 (100%) test passed.
-;; : -- done testing Bignums ------------------------------------------------------
-
-;; *** Booleans
+;; Booleans
 ;; True and false values are represented as ~#t~ and ~#f~, just like in Scheme.
 
 ;; #+name: read-redis-bool
@@ -228,17 +172,7 @@
     (string=? (read-line port) "t")))
 ;; read-redis-bool ends here
 
-
-
-;; #+RESULTS:
-;; : -- testing Booleans ----------------------------------------------------------
-;; : #t ................................................................... [ PASS]
-;; : #f ................................................................... [ PASS]
-;; : 2 tests completed in 0.0 seconds.
-;; : 2 out of 2 (100%) tests passed.
-;; : -- done testing Booleans -----------------------------------------------------
-
-;; *** Null
+;; Null
 ;; The null type is encoded simply as ~_~, and results in ~'()~.
 
 ;; #+name: read-redis-null
@@ -249,16 +183,7 @@
     (read-line port) '()))
 ;; read-redis-null ends here
 
-
-
-;; #+RESULTS:
-;; : -- testing Null --------------------------------------------------------------
-;; : _ .................................................................... [ PASS]
-;; : 1 test completed in 0.0 seconds.
-;; : 1 out of 1 (100%) test passed.
-;; : -- done testing Null ---------------------------------------------------------
-
-;; *** Arrays
+;; Arrays
 ;; Arrays are marked with ~*~ followed by the number of entries, and get returned as srfi-133 vectors.
 
 ;; #+begin_example
@@ -282,16 +207,7 @@
     vec))
 ;; read-redis-array ends here
 
-
-
-;; #+RESULTS:
-;; : -- testing Arrays ------------------------------------------------------------
-;; : *3:1:2:3 ............................................................. [ PASS]
-;; : 1 test completed in 0.0 seconds.
-;; : 1 out of 1 (100%) test passed.
-;; : -- done testing Arrays -------------------------------------------------------
-
-;; *** Maps
+;; Maps
 ;; Maps are represented exactly as arrays, but instead of using the ~*~ byte, the encoded value starts with a ~%~ byte. Moreover the number of following elements must be even. Maps represent a sequence of field-value items, basically what we could call a dictionary data structure, or in other terms, an hash. They get returned as srfi-69 hash tables.
 
 ;; #+begin_example
@@ -316,17 +232,7 @@
     ht))
 ;; read-redis-map ends here
 
-
-
-;; #+RESULTS:
-;; : -- testing Maps --------------------------------------------------------------
-;; : (hash-table-ref ht "first") .......................................... [ PASS]
-;; : (hash-table-ref ht "second") ......................................... [ PASS]
-;; : 2 tests completed in 0.001 seconds.
-;; : 2 out of 2 (100%) tests passed.
-;; : -- done testing Maps ---------------------------------------------------------
-
-;; *** Sets
+;; Sets
 ;; Sets are exactly like the Array type, but the first byte is ~~~ instead of ~*~. They get returned as srfi-113 sets.
 ;; Additionally, there is a parameter defined, =redis-set-comparator=, that specifies the default comparator to be used for sets. It defaults to `(make-default-comparator)`.
 
@@ -359,16 +265,7 @@
     s))
 ;; read-redis-set ends here
 
-
-
-;; #+RESULTS:
-;; : -- testing Sets --------------------------------------------------------------
-;; : ~4+orange+apple#t#f .................................................. [ PASS]
-;; : 1 test completed in 0.001 seconds.
-;; : 1 out of 1 (100%) test passed.
-;; : -- done testing Sets ---------------------------------------------------------
-
-;; *** Attributes
+;; Attributes
 ;; The attribute type is exactly like the Map type, but instead of the ~%~ first byte, the ~|~ byte is used. Attributes describe a dictionary exactly like the Map type, however the client should not consider such a dictionary part of the reply, but just auxiliary data that is used in order to augment the reply.
 
 ;; This library returns two values in this case, the first value being the actual data reply from redis, the second one being the attributes.

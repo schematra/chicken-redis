@@ -244,7 +244,7 @@ chicken
 <<prep-test>>
 <<read-redis-blob-string>>
 (test-group "Blob strings"
-  (test "$10helloworld"
+  (test "$10\r\nhelloworld"
         "helloworld"
         (with-input-from-string "10\r\nhelloworld\r\n" read-redis-blob-string)))
 #+end_src
@@ -558,7 +558,7 @@ This library returns two values in this case, the first value being the actual d
 
 ** Source
 
-The source is available at [[https://gitea.lyrion.ch/zilti/redis.git]].
+The source is available at [[https://gitea.lyrion.ch/Chicken/redis.git]].
 
 ** Author
 
@@ -582,8 +582,8 @@ Daniel Ziltener
 
 #+begin_src scheme :noweb yes :tangle redis.release-info :exports none
 ;; -*- Scheme -*-
-(repo git "https://gitea.lyrion.ch/zilti/redis.git")
-(uri targz "https://gitea.lyrion.ch/zilti/redis/archive/{egg-release}.tar.gz")
+(repo git "https://gitea.lyrion.ch/Chicken/redis.git")
+(uri targz "https://gitea.lyrion.ch/Chicken/redis/archive/{egg-release}.tar.gz")
 <<gen-releases()>>
 #+end_src
 

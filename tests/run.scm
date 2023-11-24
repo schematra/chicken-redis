@@ -43,7 +43,7 @@
         (with-input-from-string "180\r\n" read-redis-number)))
 ;; Integers:2 ends here
 
-
+;; Bignums
 ;; Bignums are prefixed with ~(~.
 
 ;; #+begin_example
