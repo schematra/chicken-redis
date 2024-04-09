@@ -2,6 +2,7 @@
 (import r7rs
         (chicken base)
         (chicken port)
+        (chicken string)
         (chicken io)
         (chicken tcp)
         (srfi 34)	;; Exception Handling
@@ -28,15 +29,17 @@
 ;; Connection Management
 ;; This egg currently uses a simple TCP connection without any "bells and whistles". The two ports are kept in a record of type =redis-connection= in the fields ~input~ and ~output~.
 
-;; ~(redis-connect host port)~
-;; Connects to a (hopefully) Redis server at =host:port=.
+;; ~(redis-connect host port #!optional (protocol-version 1))~
+;; Connects to a (hopefully) Redis server at =host:port=, using the given protocol version. Defaults, like Redis itself, to version 1.
 
 
 ;; [[file:redis.org::*Connection Management][Connection Management:1]]
 (define-record-type redis-connection #t #t input output)
-(define (redis-connect host port)
+(define (redis-connect host port #!optional (protocol-version 1))
   (let-values (((i o) (tcp-connect host port)))
-    (make-redis-connection i o)))
+    (values (make-redis-connection i o)
+            (and (write-line (string-append "HELLO " (->string protocol-version)) o)
+                (redis-read-reply i)))))
 ;; Connection Management:1 ends here
 
 
@@ -80,7 +83,7 @@
 
 ;; Supported Data Types
 
-;; This Redis client supports all data types up to and including as specified in [[https://github.com/antirez/RESP3/blob/master/spec.md][RESP3]]. Setting the protocol version with the =HELLO= command, however, is the user's responsibility.
+;; This Redis client supports all data types up to and including as specified in [[https://github.com/antirez/RESP3/blob/master/spec.md][RESP3]].
 
 ;; #+name: redis-read-reply
 

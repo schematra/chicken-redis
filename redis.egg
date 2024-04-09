@@ -7,7 +7,7 @@
  (synopsis "A Redis client library for Chicken Scheme")
  (category db)
  (license "BSD")
- (version "0.5")
+ (version "0.6")
  (dependencies r7rs srfi-34 srfi-35 srfi-69 srfi-99 srfi-113 srfi-128 srfi-133 srfi-152 srfi-158)
  (test-dependencies test)
 

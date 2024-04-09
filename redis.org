@@ -79,21 +79,22 @@
 #+end_src
 
 #+begin_src scheme :noweb yes :tangle redis-impl.scm :exports none
-(import r7rs
-        (chicken base)
-        (chicken port)
-        (chicken io)
-        (chicken tcp)
-        (srfi 34)	;; Exception Handling
-        (srfi 35)	;; Exception Types
-        (srfi 69)	;; Hash Tables
-        (srfi 99)	;; Extended Records
-        (srfi 113)	;; Sets and Bags
-        (srfi 128)	;; Comparators
-        (srfi 133)	;; Vectors
-        (srfi 152)	;; Strings
-        (srfi 158)	;; Generators and Accumulators
-        )
+  (import r7rs
+          (chicken base)
+          (chicken port)
+          (chicken string)
+          (chicken io)
+          (chicken tcp)
+          (srfi 34)	;; Exception Handling
+          (srfi 35)	;; Exception Types
+          (srfi 69)	;; Hash Tables
+          (srfi 99)	;; Extended Records
+          (srfi 113)	;; Sets and Bags
+          (srfi 128)	;; Comparators
+          (srfi 133)	;; Vectors
+          (srfi 152)	;; Strings
+          (srfi 158)	;; Generators and Accumulators
+          )
 #+end_src
 
 #+begin_src scheme :tangle tests/run.scm :exports none
@@ -103,30 +104,32 @@
 ** Exceptions
 This library defines an SRFI-35 exception type ~&redis-error~ that gets raised when Redis returns an error. The exception type has a single field called ~redis-error-message~ containing the error message returned by Redis.
 #+begin_src scheme :tangle redis-impl.scm
-(define-condition-type &redis-error &error
-  redis-error?
-  (redis-error-message redis-error-message))
+  (define-condition-type &redis-error &error
+    redis-error?
+    (redis-error-message redis-error-message))
 #+end_src
 
 ** Connection Management
 This egg currently uses a simple TCP connection without any "bells and whistles". The two ports are kept in a record of type =redis-connection= in the fields ~input~ and ~output~.
 
-~(redis-connect host port)~
-Connects to a (hopefully) Redis server at =host:port=.
+~(redis-connect host port #!optional (protocol-version 1))~
+Connects to a (hopefully) Redis server at =host:port=, using the given protocol version. Defaults, like Redis itself, to version 1.
 
 #+begin_src scheme :tangle redis-impl.scm :exports none
-(define-record-type redis-connection #t #t input output)
-(define (redis-connect host port)
-  (let-values (((i o) (tcp-connect host port)))
-    (make-redis-connection i o)))
+  (define-record-type redis-connection #t #t input output)
+  (define (redis-connect host port #!optional (protocol-version 1))
+    (let-values (((i o) (tcp-connect host port)))
+      (values (make-redis-connection i o)
+              (and (write-line (string-append "HELLO " (->string protocol-version)) o)
+                  (redis-read-reply i)))))
 #+end_src
 
 ~(redis-disconnect rconn)~
 Disconnects from =rconn= which must be a =redis-connection=.
 #+begin_src scheme :tangle redis-impl.scm :exports none
-(define (redis-disconnect rconn)
-  (tcp-abandon-port (redis-connection-input rconn))
-  (tcp-abandon-port (redis-connection-output rconn)))
+  (define (redis-disconnect rconn)
+    (tcp-abandon-port (redis-connection-input rconn))
+    (tcp-abandon-port (redis-connection-output rconn)))
 #+end_src
 
 ** Running Commands
@@ -134,50 +137,50 @@ Disconnects from =rconn= which must be a =redis-connection=.
 ~(redis-run rconn command . args)~
 Uses connection =rconn= to run =command= with =args=. The args will be appended to the command, space-separated. Returns the parsed reply.
 #+begin_src scheme :tangle redis-impl.scm :exports none
-(define (redis-run rconn command . args)
-  (let ((in (redis-connection-input rconn))
-        (out (redis-connection-output rconn))
-        (comm (string-join (cons command args))))
-    (write-line comm out)
-    (redis-read-reply in)))
+  (define (redis-run rconn command . args)
+    (let ((in (redis-connection-input rconn))
+          (out (redis-connection-output rconn))
+          (comm (string-join (cons command args))))
+      (write-line comm out)
+      (redis-read-reply in)))
 #+end_src
 
 ~(redis-run-proc rconn proc . args)~
 Calls =proc= with the output port of the =rconn= as current output port, optionally with =args=. Returns the parsed reply.
 #+begin_src scheme :tangle redis-impl.scm :exports none
-(define (redis-run-proc rconn proc . args)
-  (let ((in (redis-connection-input rconn))
-        (out (redis-connection-output rconn)))
-    (with-output-to-port out
-      (cut apply proc args))
-    (redis-read-reply in)))
+  (define (redis-run-proc rconn proc . args)
+    (let ((in (redis-connection-input rconn))
+          (out (redis-connection-output rconn)))
+      (with-output-to-port out
+        (cut apply proc args))
+      (redis-read-reply in)))
 #+end_src
 
 
 ** Supported Data Types
 
-This Redis client supports all data types up to and including as specified in [[https://github.com/antirez/RESP3/blob/master/spec.md][RESP3]]. Setting the protocol version with the =HELLO= command, however, is the user's responsibility.
+This Redis client supports all data types up to and including as specified in [[https://github.com/antirez/RESP3/blob/master/spec.md][RESP3]].
 
 #+name: redis-read-reply
 #+begin_src scheme :tangle redis-impl.scm :exports none
-(define (redis-read-reply #!optional port)
-  (let* ((port (or port (current-input-port)))
-         (sigil (read-char port)))
-    (case sigil
-      ((#\+) (read-redis-simple-string port))
-      ((#\-) (raise (make-condition &redis-error 'redis-error-message (read-redis-simple-string port))))
-      ((#\$) (read-redis-blob-string port))
-      ((#\!) (raise (make-condition &redis-error 'redis-error-message (read-redis-blob-string port))))
-      ((#\=) (read-redis-blob-string port))
-      ((#\:) (read-redis-number port))
-      ((#\,) (read-redis-number port))
-      ((#\() (read-redis-number port))
-      ((#\#) (read-redis-bool port))
-      ((#\_) (read-redis-null port))
-      ((#\*) (read-redis-array port))
-      ((#\%) (read-redis-map port))
-      ((#\~) (read-redis-set port))
-      ((#\|) (read-redis-with-attributes port)))))
+  (define (redis-read-reply #!optional port)
+    (let* ((port (or port (current-input-port)))
+           (sigil (read-char port)))
+      (case sigil
+        ((#\+) (read-redis-simple-string port))
+        ((#\-) (raise (make-condition &redis-error 'redis-error-message (read-redis-simple-string port))))
+        ((#\$) (read-redis-blob-string port))
+        ((#\!) (raise (make-condition &redis-error 'redis-error-message (read-redis-blob-string port))))
+        ((#\=) (read-redis-blob-string port))
+        ((#\:) (read-redis-number port))
+        ((#\,) (read-redis-number port))
+        ((#\() (read-redis-number port))
+        ((#\#) (read-redis-bool port))
+        ((#\_) (read-redis-null port))
+        ((#\*) (read-redis-array port))
+        ((#\%) (read-redis-map port))
+        ((#\~) (read-redis-set port))
+        ((#\|) (read-redis-with-attributes port)))))
 #+end_src
 
 *** Simple Strings
@@ -190,9 +193,9 @@ Simple strings start with ~+~ and are single-line.
 
 #+name: read-redis-simple-string
 #+begin_src scheme :tangle redis-impl.scm :exports none :results silent
-(define (read-redis-simple-string #!optional port)
-  (let ((port (or port (current-input-port))))
-    (read-line port)))
+  (define (read-redis-simple-string #!optional port)
+    (let ((port (or port (current-input-port))))
+      (read-line port)))
 #+end_src
 
 #+name: simple-string-test
@@ -229,15 +232,15 @@ chicken
 
 #+name: read-redis-blob-string
 #+begin_src scheme :tangle redis-impl.scm :exports none
-(define (read-redis-blob-string #!optional port)
-  (let* ((port (or port (current-input-port)))
-         (charcount (string->number (read-line port)))
-         (str (list->string
-               (generator-map->list
-                (lambda (i) (read-char port))
-                (make-range-generator 0 charcount)))))
-    (read-line port)
-    str))
+  (define (read-redis-blob-string #!optional port)
+    (let* ((port (or port (current-input-port)))
+           (charcount (string->number (read-line port)))
+           (str (list->string
+                 (generator-map->list
+                  (lambda (i) (read-char port))
+                  (make-range-generator 0 charcount)))))
+      (read-line port)
+      str))
 #+end_src
 
 #+begin_src scheme :tangle tests/run.scm :noweb strip-tangle :exports none :post test-post(input=*this*) :results output
@@ -282,12 +285,12 @@ Integers are sent to the client prefixed with ~:~.
 
 #+name: read-redis-number
 #+begin_src scheme :tangle redis-impl.scm :exports none
-(define (read-redis-number #!optional port)
-  (let* ((port (or port (current-input-port)))
-         (elem (read-line port)))
-    (if (string=? elem "inf")
-        (string->number "+inf")
-        (string->number elem))))
+  (define (read-redis-number #!optional port)
+    (let* ((port (or port (current-input-port)))
+           (elem (read-line port)))
+      (if (string=? elem "inf")
+          (string->number "+inf")
+          (string->number elem))))
 #+end_src
 
 #+begin_src scheme :tangle tests/run.scm :noweb strip-tangle :exports none :post test-post(input=*this*) :results output
@@ -339,9 +342,9 @@ True and false values are represented as ~#t~ and ~#f~, just like in Scheme.
 
 #+name: read-redis-bool
 #+begin_src scheme :tangle redis-impl.scm :exports none
-(define (read-redis-bool #!optional port)
-  (let ((port (or port (current-input-port))))
-    (string=? (read-line port) "t")))
+  (define (read-redis-bool #!optional port)
+    (let ((port (or port (current-input-port))))
+      (string=? (read-line port) "t")))
 #+end_src
 
 #+begin_src scheme :tangle tests/run.scm :noweb strip-tangle :exports none :post test-post(input=*this*) :results output
@@ -367,9 +370,9 @@ The null type is encoded simply as ~_~, and results in ~'()~.
 
 #+name: read-redis-null
 #+begin_src scheme :tangle redis-impl.scm :exports none
-(define (read-redis-null #!optional port)
-  (let ((port (or port (current-input-port))))
-    (read-line port) '()))
+  (define (read-redis-null #!optional port)
+    (let ((port (or port (current-input-port))))
+      (read-line port) '()))
 #+end_src
 
 #+begin_src scheme :tangle tests/run.scm :noweb strip-tangle :exports none :post test-post(input=*this*) :results output
@@ -399,15 +402,15 @@ Arrays are marked with ~*~ followed by the number of entries, and get returned a
 
 #+name: read-redis-array
 #+begin_src scheme :tangle redis-impl.scm :exports none
-(define (read-redis-array #!optional port)
-  (let* ((port (or port (current-input-port)))
-         (elems (string->number (read-line port)))
-         (vec (make-vector elems '())))
-    (generator-for-each
-     (lambda (i)
-       (vector-set! vec i (redis-read-reply port)))
-     (make-range-generator 0 elems))
-    vec))
+  (define (read-redis-array #!optional port)
+    (let* ((port (or port (current-input-port)))
+           (elems (string->number (read-line port)))
+           (vec (make-vector elems '())))
+      (generator-for-each
+       (lambda (i)
+         (vector-set! vec i (redis-read-reply port)))
+       (make-range-generator 0 elems))
+      vec))
 #+end_src
 
 #+begin_src scheme :tangle tests/run.scm :noweb strip-tangle :exports none :post test-post(input=*this*) :results output
@@ -440,15 +443,15 @@ Maps are represented exactly as arrays, but instead of using the ~*~ byte, the e
 
 #+name: read-redis-map
 #+begin_src scheme :tangle redis-impl.scm :exports none
-(define (read-redis-map #!optional port)
-  (let* ((port (or port (current-input-port)))
-         (elems (string->number (read-line port)))
-         (ht (make-hash-table)))
-    (generator-for-each
-     (lambda (i)
-       (hash-table-set! ht (redis-read-reply port) (redis-read-reply port)))
-     (make-range-generator 0 elems))
-    ht))
+  (define (read-redis-map #!optional port)
+    (let* ((port (or port (current-input-port)))
+           (elems (string->number (read-line port)))
+           (ht (make-hash-table)))
+      (generator-for-each
+       (lambda (i)
+         (hash-table-set! ht (redis-read-reply port) (redis-read-reply port)))
+       (make-range-generator 0 elems))
+      ht))
 #+end_src
 
 #+begin_src scheme :tangle tests/run.scm :noweb strip-tangle :exports none :post test-post(input=*this*) :results output
@@ -485,22 +488,22 @@ Additionally, there is a parameter defined, =redis-set-comparator=, that specifi
 
 #+name: read-redis-set
 #+begin_src scheme :tangle redis-impl.scm :exports none
-(define redis-set-comparator
-  (make-parameter (make-default-comparator)
-                  (lambda (newcomp)
-                    (or (and (comparator? newcomp)
-                             newcomp)
-                        '()))))
+  (define redis-set-comparator
+    (make-parameter (make-default-comparator)
+                    (lambda (newcomp)
+                      (or (and (comparator? newcomp)
+                               newcomp)
+                          '()))))
 
-(define (read-redis-set #!optional port)
-  (let* ((port (or port (current-input-port)))
-         (elems (string->number (read-line port)))
-         (s (set (redis-set-comparator))))
-    (generator-for-each
-     (lambda (i)
-       (set-adjoin! s (redis-read-reply port)))
-     (make-range-generator 0 elems))
-    s))
+  (define (read-redis-set #!optional port)
+    (let* ((port (or port (current-input-port)))
+           (elems (string->number (read-line port)))
+           (s (set (redis-set-comparator))))
+      (generator-for-each
+       (lambda (i)
+         (set-adjoin! s (redis-read-reply port)))
+       (make-range-generator 0 elems))
+      s))
 #+end_src
 
 #+begin_src scheme :tangle tests/run.scm :noweb strip-tangle :exports none :post test-post(input=*this*) :results output
@@ -529,10 +532,10 @@ This library returns two values in this case, the first value being the actual d
 
 #+name: read-redis-with-attributes
 #+begin_src scheme :tangle redis-impl.scm :exports none
-(define (read-redis-with-attributes #!optional port)
-  (let* ((port (or port (current-input-port)))
-         (attributes (read-redis-map port)))
-    (values (redis-read-reply port) attributes)))
+  (define (read-redis-with-attributes #!optional port)
+    (let* ((port (or port (current-input-port)))
+           (attributes (read-redis-map port)))
+      (values (redis-read-reply port) attributes)))
 #+end_src
 
 * About this egg
@@ -567,7 +570,8 @@ Daniel Ziltener
 ** Version History
 
 #+name: version-history
-| 0.5 | Initial Release |
+| 0.6 | Easier Protocol Version Setting |
+| 0.5 | Initial Release                 |
 
 #+name: gen-releases
 #+begin_src emacs-lisp :var vers=version-history :results raw :exports none
