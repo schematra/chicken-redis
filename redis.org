@@ -112,19 +112,25 @@ This library defines an SRFI-35 exception type ~&redis-error~ that gets raised w
 ** Connection Management
 This egg currently uses a simple TCP connection without any "bells and whistles". The two ports are kept in a record of type =redis-connection= in the fields ~input~ and ~output~.
 
-~(redis-connect host port #!optional (protocol-version 1))~
+#+begin_src scheme
+(redis-connect host port #!optional (protocol-version 1))
+#+end_src
+
 Connects to a (hopefully) Redis server at =host:port=, using the given protocol version. Defaults, like Redis itself, to version 1.
 
 #+begin_src scheme :tangle redis-impl.scm :exports none
-  (define-record-type redis-connection #t #t input output)
-  (define (redis-connect host port #!optional (protocol-version 1))
-    (let-values (((i o) (tcp-connect host port)))
-      (values (make-redis-connection i o)
-              (and (write-line (string-append "HELLO " (->string protocol-version)) o)
-                  (redis-read-reply i)))))
+    (define-record-type redis-connection #t #t input output)
+    (define (redis-connect host port #!optional (protocol-version 1))
+      (let-values (((i o) (tcp-connect host port)))
+        (values (make-redis-connection i o)
+                (and (write-line (string-append "HELLO " (->string protocol-version)) o)
+                    (redis-read-reply i)))))
 #+end_src
 
-~(redis-disconnect rconn)~
+#+begin_src scheme
+(redis-disconnect rconn)
+#+end_src
+
 Disconnects from =rconn= which must be a =redis-connection=.
 #+begin_src scheme :tangle redis-impl.scm :exports none
   (define (redis-disconnect rconn)
@@ -134,7 +140,10 @@ Disconnects from =rconn= which must be a =redis-connection=.
 
 ** Running Commands
 
-~(redis-run rconn command . args)~
+#+begin_src scheme
+(redis-run rconn command . args)
+#+end_src
+
 Uses connection =rconn= to run =command= with =args=. The args will be appended to the command, space-separated. Returns the parsed reply.
 #+begin_src scheme :tangle redis-impl.scm :exports none
   (define (redis-run rconn command . args)
@@ -145,7 +154,10 @@ Uses connection =rconn= to run =command= with =args=. The args will be appended 
       (redis-read-reply in)))
 #+end_src
 
-~(redis-run-proc rconn proc . args)~
+#+begin_src scheme
+(redis-run-proc rconn proc . args)
+#+end_src
+
 Calls =proc= with the output port of the =rconn= as current output port, optionally with =args=. Returns the parsed reply.
 #+begin_src scheme :tangle redis-impl.scm :exports none
   (define (redis-run-proc rconn proc . args)

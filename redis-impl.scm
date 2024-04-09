@@ -26,60 +26,55 @@
   (redis-error-message redis-error-message))
 ;; Exceptions:1 ends here
 
-;; Connection Management
-;; This egg currently uses a simple TCP connection without any "bells and whistles". The two ports are kept in a record of type =redis-connection= in the fields ~input~ and ~output~.
 
-;; ~(redis-connect host port #!optional (protocol-version 1))~
+
 ;; Connects to a (hopefully) Redis server at =host:port=, using the given protocol version. Defaults, like Redis itself, to version 1.
 
 
-;; [[file:redis.org::*Connection Management][Connection Management:1]]
+;; [[file:redis.org::*Connection Management][Connection Management:2]]
 (define-record-type redis-connection #t #t input output)
 (define (redis-connect host port #!optional (protocol-version 1))
   (let-values (((i o) (tcp-connect host port)))
     (values (make-redis-connection i o)
             (and (write-line (string-append "HELLO " (->string protocol-version)) o)
                 (redis-read-reply i)))))
-;; Connection Management:1 ends here
+;; Connection Management:2 ends here
 
 
 
-;; ~(redis-disconnect rconn)~
 ;; Disconnects from =rconn= which must be a =redis-connection=.
 
-;; [[file:redis.org::*Connection Management][Connection Management:2]]
+;; [[file:redis.org::*Connection Management][Connection Management:4]]
 (define (redis-disconnect rconn)
   (tcp-abandon-port (redis-connection-input rconn))
   (tcp-abandon-port (redis-connection-output rconn)))
-;; Connection Management:2 ends here
+;; Connection Management:4 ends here
 
-;; Running Commands
 
-;; ~(redis-run rconn command . args)~
+
 ;; Uses connection =rconn= to run =command= with =args=. The args will be appended to the command, space-separated. Returns the parsed reply.
 
-;; [[file:redis.org::*Running Commands][Running Commands:1]]
+;; [[file:redis.org::*Running Commands][Running Commands:2]]
 (define (redis-run rconn command . args)
   (let ((in (redis-connection-input rconn))
         (out (redis-connection-output rconn))
         (comm (string-join (cons command args))))
     (write-line comm out)
     (redis-read-reply in)))
-;; Running Commands:1 ends here
+;; Running Commands:2 ends here
 
 
 
-;; ~(redis-run-proc rconn proc . args)~
 ;; Calls =proc= with the output port of the =rconn= as current output port, optionally with =args=. Returns the parsed reply.
 
-;; [[file:redis.org::*Running Commands][Running Commands:2]]
+;; [[file:redis.org::*Running Commands][Running Commands:4]]
 (define (redis-run-proc rconn proc . args)
   (let ((in (redis-connection-input rconn))
         (out (redis-connection-output rconn)))
     (with-output-to-port out
       (cut apply proc args))
     (redis-read-reply in)))
-;; Running Commands:2 ends here
+;; Running Commands:4 ends here
 
 ;; Supported Data Types
 
