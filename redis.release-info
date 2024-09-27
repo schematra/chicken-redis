@@ -1,7 +1,7 @@
 ;; [[file:redis.org::*Version History][Version History:3]]
 ;; -*- Scheme -*-
-(repo git "https://gitea.lyrion.ch/Chicken/redis.git")
-(uri targz "https://gitea.lyrion.ch/Chicken/redis/archive/{egg-release}.tar.gz")
+(repo git "https://forgejo.lyrion.ch/Chicken/redis.git")
+(uri targz "https://forgejo.lyrion.ch/Chicken/redis/archive/{egg-release}.tar.gz")
 (release "0.6") ;; Easier Protocol Version Setting
 (release "0.5") ;; Initial Release
 ;; Version History:3 ends here

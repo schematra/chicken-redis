@@ -573,7 +573,7 @@ This library returns two values in this case, the first value being the actual d
 
 ** Source
 
-The source is available at [[https://gitea.lyrion.ch/Chicken/redis.git]].
+The source is available at [[https://forgejo.lyrion.ch/Chicken/redis.git]].
 
 ** Author
 
@@ -598,8 +598,8 @@ Daniel Ziltener
 
 #+begin_src scheme :noweb yes :tangle redis.release-info :exports none
 ;; -*- Scheme -*-
-(repo git "https://gitea.lyrion.ch/Chicken/redis.git")
-(uri targz "https://gitea.lyrion.ch/Chicken/redis/archive/{egg-release}.tar.gz")
+(repo git "https://forgejo.lyrion.ch/Chicken/redis.git")
+(uri targz "https://forgejo.lyrion.ch/Chicken/redis/archive/{egg-release}.tar.gz")
 <<gen-releases()>>
 #+end_src
 
