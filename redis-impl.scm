@@ -196,7 +196,7 @@
 ;; [[file:redis.org::read-redis-array][read-redis-array]]
 (define (read-redis-array #!optional port)
   (let* ((port (or port (current-input-port)))
-         (elems (string->number (read-line port)))
+         (elems (max 0 (string->number (read-line port))))
          (vec (make-vector elems '())))
     (generator-for-each
      (lambda (i)

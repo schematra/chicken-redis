@@ -57,25 +57,27 @@
 * API
 
 #+begin_src scheme :noweb yes :tangle redis.scm :exports none
-(define-library (redis)
-  (import (chicken base))
-  (export redis-connect
-          redis-disconnect
-          redis-run
-          redis-run-proc
+  (define-library (redis)
+    (import (chicken base))
+    (export redis-connect
+            redis-disconnect
+            redis-run
+            redis-run-proc
+  	  redis-read-reply ;; used in pub-sub
 
-          make-redis-connection
-          redis-connection?
-          redis-connection-input
-          redis-connection-output
+            make-redis-connection
+            redis-connection?
+            redis-connection-input
+            redis-connection-output
 
-          &redis-error
-          redis-error?
-          redis-error-message
 
-          redis-set-comparator)
-  (begin
-    (include-relative "redis-impl.scm")))
+            &redis-error
+            redis-error?
+            redis-error-message
+
+            redis-set-comparator)
+    (begin
+      (include-relative "redis-impl.scm")))
 #+end_src
 
 #+begin_src scheme :noweb yes :tangle redis-impl.scm :exports none
@@ -416,7 +418,7 @@ Arrays are marked with ~*~ followed by the number of entries, and get returned a
 #+begin_src scheme :tangle redis-impl.scm :exports none
   (define (read-redis-array #!optional port)
     (let* ((port (or port (current-input-port)))
-           (elems (string->number (read-line port)))
+           (elems (max 0 (string->number (read-line port))))
            (vec (make-vector elems '())))
       (generator-for-each
        (lambda (i)
@@ -582,6 +584,7 @@ Daniel Ziltener
 ** Version History
 
 #+name: version-history
+| 0.7 | Bug fixes                       |
 | 0.6 | Easier Protocol Version Setting |
 | 0.5 | Initial Release                 |
 

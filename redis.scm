@@ -8,11 +8,13 @@
           redis-disconnect
           redis-run
           redis-run-proc
+	  redis-read-reply ;; used in pub-sub
 
           make-redis-connection
           redis-connection?
           redis-connection-input
           redis-connection-output
+
 
           &redis-error
           redis-error?
