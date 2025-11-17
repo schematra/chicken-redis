@@ -98,6 +98,7 @@
       ((#\#) (read-redis-bool port))
       ((#\_) (read-redis-null port))
       ((#\*) (read-redis-array port))
+      ((#\>) (read-redis-array port)) ;; RESP3 push array
       ((#\%) (read-redis-map port))
       ((#\~) (read-redis-set port))
       ((#\|) (read-redis-with-attributes port)))))
